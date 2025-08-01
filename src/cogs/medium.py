@@ -5,6 +5,7 @@ Contains commands for detecting moderate security vulnerabilities.
 
 import discord
 import asyncio
+import random
 from discord.ext import commands
 from datetime import datetime, timezone
 from language_handler import language_handler
@@ -173,12 +174,12 @@ class MediumChecks(commands.Cog):
 
     @commands.hybrid_command(
         name="webhook_overflow_check",
-        brief="Vérifie le nombre de webhooks par salon",
-        description="Compte les webhooks actifs dans chaque salon (limite recommandée: 10)"
+        brief="Checks webhook count per channel",
+        description="Counts active webhooks in each channel (recommended limit: 10)"
     )
     @commands.has_permissions(administrator=True)
     async def webhook_overflow_check(self, ctx):
-        """Vérifie le nombre de webhooks dans chaque salon."""
+        """Check webhook count per channel."""
         guild = ctx.guild
         webhook_data = []
         total_webhooks = 0
@@ -198,7 +199,7 @@ class MediumChecks(commands.Cog):
             except discord.Forbidden:
                 webhook_data.append({
                     'channel': channel,
-                    'count': 'Accès refusé',
+                    'count': 'access_denied',
                     'webhooks': []
                 })
         
@@ -206,13 +207,19 @@ class MediumChecks(commands.Cog):
         webhook_data.sort(key=lambda x: x['count'] if isinstance(x['count'], int) else 0, reverse=True)
         
         embed = discord.Embed(
-            title="🔗 Vérification des webhooks par salon",
+            title=language_handler.get_text(ctx.guild.id, "webhook_overflow_title"),
             color=discord.Color.red() if any(isinstance(item['count'], int) and item['count'] > 10 for item in webhook_data) else discord.Color.green(),
             timestamp=datetime.now(timezone.utc)
         )
         
         if webhook_data:
-            description = f"**Total: {total_webhooks} webhooks dans {len([w for w in webhook_data if isinstance(w['count'], int) and w['count'] > 0])} salons**\n\n"
+            channels_with_webhooks = len([w for w in webhook_data if isinstance(w['count'], int) and w['count'] > 0])
+            description = language_handler.get_text(
+                ctx.guild.id, 
+                "webhook_overflow_summary",
+                total=total_webhooks, 
+                channels=channels_with_webhooks
+            ) + "\n\n"
             
             # Show channels with webhooks
             for channel_info in webhook_data[:15]:
@@ -224,27 +231,39 @@ class MediumChecks(commands.Cog):
                     description += f"{risk_indicator} **#{channel.name}**: {count} webhook(s)"
                     
                     if count > 10:
-                        description += " ⚠️ LIMITE DÉPASSÉE"
+                        description += language_handler.get_text(ctx.guild.id, "webhook_overflow_limit_exceeded")
                     
                     # Show webhook details for problematic channels
                     if count > 5 and len(channel_info['webhooks']) > 0:
                         webhook_names = [wh.name for wh in channel_info['webhooks'][:3]]
-                        description += f"\n   Webhooks: {', '.join(webhook_names)}"
+                        description += f"\n   {language_handler.get_text(ctx.guild.id, 'webhook_overflow_webhooks_list', names=', '.join(webhook_names))}"
                         if len(channel_info['webhooks']) > 3:
-                            description += f" (+{len(channel_info['webhooks']) - 3} autres)"
+                            description += language_handler.get_text(
+                                ctx.guild.id, 
+                                "webhook_overflow_more_webhooks",
+                                count=len(channel_info['webhooks']) - 3
+                            )
                     
                     description += "\n\n"
-                elif count == 'Accès refusé':
-                    description += f"🔒 **#{channel.name}**: Accès refusé\n\n"
+                elif count == 'access_denied':
+                    description += language_handler.get_text(
+                        ctx.guild.id, 
+                        "webhook_overflow_access_denied",
+                        channel=channel.name
+                    ) + "\n\n"
             
             if len(webhook_data) > 15:
                 remaining = len([w for w in webhook_data[15:] if isinstance(w['count'], int) and w['count'] > 0])
                 if remaining > 0:
-                    description += f"... et {remaining} autres salons avec webhooks"
+                    description += language_handler.get_text(
+                        ctx.guild.id, 
+                        "webhook_overflow_more_channels",
+                        count=remaining
+                    )
                     
             embed.description = description
         else:
-            embed.description = "✅ Aucun webhook détecté dans le serveur"
+            embed.description = language_handler.get_text(ctx.guild.id, "webhook_overflow_no_webhooks")
         
         await ctx.send(embed=embed)
 
@@ -453,15 +472,19 @@ class MediumChecks(commands.Cog):
         await ctx.send(embed=embed)
     
     async def execute_checks(self, ctx: commands.Context):
-        """Execute all medium-level checks."""
-        tasks = [
-            self.spam_perm_check(ctx),
-            self.mass_mention_check(ctx),
-            self.webhook_overflow_check(ctx),
-            self.voice_damage_check(ctx),
-            self.channel_deletion_check(ctx)
+        """Execute all medium-level checks with delays between each check."""
+        checks = [
+            self.spam_perm_check,
+            self.mass_mention_check,
+            self.webhook_overflow_check,
+            self.voice_damage_check,
+            self.channel_deletion_check
         ]
-        return await asyncio.gather(*tasks)
+        
+        for i, check in enumerate(checks):
+            await check(ctx)
+            if i < len(checks) - 1:
+                await asyncio.sleep(3.0)
 
 async def setup(bot):
     """Setup function for the cog."""

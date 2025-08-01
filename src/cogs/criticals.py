@@ -5,6 +5,7 @@ Contains commands for detecting severe security vulnerabilities.
 
 import discord
 import asyncio
+import random
 from discord.ext import commands
 from datetime import datetime, timezone
 from language_handler import language_handler
@@ -522,16 +523,20 @@ class CriticalsChecks(commands.Cog):
         await ctx.send(embed=embed)
         
     async def execute_checks(self, ctx):
-        """Execute all critical checks."""
-        tasks = [
-            self.role_hierarchy_check(ctx),
-            self.admin_leak_check(ctx),
-            self.dangerous_perm_check(ctx),
-            self.everyone_perm_check(ctx),
-            self.unprotected_webhooks(ctx),
-            self.server_settings_check(ctx)
+        """Execute all critical checks with delays between each check."""
+        checks = [
+            self.role_hierarchy_check,
+            self.admin_leak_check,
+            self.dangerous_perm_check,
+            self.everyone_perm_check,
+            self.unprotected_webhooks,
+            self.server_settings_check
         ]
-        return asyncio.gather(*tasks)
+        
+        for i, check in enumerate(checks):
+            await check(ctx)
+            if i < len(checks) - 1:
+                await asyncio.sleep(3.0)
 
 async def setup(bot):
     """Setup function for the cog."""

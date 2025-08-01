@@ -21,6 +21,18 @@ bot = commands.Bot(
     command_prefix=["$"],
 )
 
+@bot.event
+async def on_command_error(ctx: Context, error: Exception):
+    """Handle command errors."""
+    print(f"❌ Error in command '{ctx.command}': {error}")
+    if isinstance(error, commands.MissingPermissions):
+        await ctx.send(language_handler.get_text(ctx.guild.id, "errors.missing_permissions"))
+    elif isinstance(error, commands.CommandNotFound):
+        await ctx.send(language_handler.get_text(ctx.guild.id, "errors.command_not_found"))
+    else:
+        await ctx.send(language_handler.get_text(ctx.guild.id, "errors.generic_error"))
+        traceback.print_exception(type(error), error, error.__traceback__)
+
 async def load_cogs():
     """Load all cogs for the bot."""
     try:
@@ -60,7 +72,7 @@ async def load_cogs():
     EXEMPLE :
     - `reload_cogs` : Recharge tous les cogs principaux du bot
     """,
-    hidden=False,
+    hidden=True,
     enabled=True,
     case_insensitive=True,
 )

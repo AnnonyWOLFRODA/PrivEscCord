@@ -77,14 +77,35 @@ class LanguageHandler:
         return self.server_languages.get(guild_id, self.default_language)
     
     def get_text(self, guild_id: int, key: str, **kwargs) -> str:
-        """Get translated text for a server."""
+        """Get translated text for a server. Supports nested keys with dot notation."""
         language = self.get_server_language(guild_id)
         
-        if language in self.translations and key in self.translations[language]:
-            text = self.translations[language][key]
-        elif self.default_language in self.translations and key in self.translations[self.default_language]:
-            text = self.translations[self.default_language][key]
-        else:
+        # Handle nested keys (e.g., "errors.missing_permissions")
+        def get_nested_value(data, key_path):
+            if '.' in key_path:
+                keys = key_path.split('.')
+                value = data
+                for k in keys:
+                    if isinstance(value, dict) and k in value:
+                        value = value[k]
+                    else:
+                        return None
+                return value
+            else:
+                return data.get(key_path)
+        
+        text = None
+        
+        # Try to get text from current language
+        if language in self.translations:
+            text = get_nested_value(self.translations[language], key)
+        
+        # Fallback to default language
+        if text is None and self.default_language in self.translations:
+            text = get_nested_value(self.translations[self.default_language], key)
+        
+        # If still not found, return the key itself
+        if text is None:
             text = key
 
         try:
