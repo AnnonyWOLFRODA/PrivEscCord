@@ -1,33 +1,9 @@
 import discord
-import time
-from pyutil import filereplace
-from datetime import datetime, timedelta, timezone
 import asyncio
-import discord.utils
-import json
-from discord.ext import commands
-from discord.ext.commands import has_role, Context, Converter, BadArgument
-from discord.ext import tasks
-import urllib.request
-import random
-import aiohttp
-import os
-import re
-import shutil
-import events
-from typing import Union
-import interactions
-from PIL import Image
-import pytz
-import io
-import string
-import locale
 import traceback
-import requests
+from discord.ext import commands
+from discord.ext.commands import Context
 from dotenv import dotenv_values
-import contextlib
-from discord.ui import Button, View, Modal, TextInput
-from discord import message, emoji, Webhook, SyncWebhook, app_commands
 
 token = dotenv_values(".env")["TOKEN"]
 

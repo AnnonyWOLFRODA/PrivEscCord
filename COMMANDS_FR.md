@@ -39,6 +39,13 @@
 - **Usage** : `$unprotected_webhooks`
 - **Permissions requises** : Administrateur
 
+### `$server_settings_check`
+**🛡️ Audit des paramètres serveur**
+- **Description** : Vérifie les paramètres de sécurité globaux du serveur (2FA, niveau de vérification, filtres de contenu, etc.)
+- **Risque** : Configuration serveur vulnérable, manque de protections de base
+- **Usage** : `$server_settings_check`
+- **Permissions requises** : Administrateur
+
 ---
 
 ## 🟡 Commandes Moyennes

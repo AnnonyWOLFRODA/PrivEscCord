@@ -31,6 +31,7 @@ Issues that enable basic attacks:
 - `$dangerous_perm_check` - Scans all roles for critical permissions
 - `$everyone_perm_check` - Audits @everyone permissions across all channels
 - `$unprotected_webhooks` - Detects webhook abuse vulnerabilities
+- `$server_settings_check` - Analyzes server security settings (2FA, verification level, content filters)
 
 ### Medium Security Checks
 - `$spam_perm_check` - Identifies spam-capable roles

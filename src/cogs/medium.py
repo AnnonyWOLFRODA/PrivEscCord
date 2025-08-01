@@ -1,18 +1,12 @@
 """
-AdminUtilities cog for NEBot.
-Contains all administrative utility commands.
+Medium-level security checks cog for PrivEscCord.
+Contains commands for detecting moderate security vulnerabilities.
 """
 
 import discord
-from discord.ext import commands
 import asyncio
-import aiohttp
-import contextlib
-import io
-import json
-from typing import Union
-from datetime import datetime, timedelta, timezone
-from dotenv import dotenv_values
+from discord.ext import commands
+from datetime import datetime, timezone
 
 class MediumChecks(commands.Cog):
     """Medium-level security checks for Discord guild vulnerabilities."""

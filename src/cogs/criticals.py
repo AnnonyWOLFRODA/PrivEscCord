@@ -1,18 +1,12 @@
 """
-AdminUtilities cog for NEBot.
-Contains all administrative utility commands.
+Critical security checks cog for PrivEscCord.
+Contains commands for detecting severe security vulnerabilities.
 """
 
 import discord
-from discord.ext import commands
 import asyncio
-import aiohttp
-import contextlib
-import io
-import json
-from typing import Union
-from datetime import datetime, timedelta, timezone
-from dotenv import dotenv_values
+from discord.ext import commands
+from datetime import datetime, timezone
 
 class CriticalsChecks(commands.Cog):
     """Critical security checks for Discord guild vulnerabilities."""
@@ -334,6 +328,160 @@ class CriticalsChecks(commands.Cog):
             embed.description = "✅ Aucune vulnérabilité webhook détectée"
         
         await ctx.send(embed=embed)
+
+    @commands.hybrid_command(
+        name="server_settings_check",
+        brief="Vérifie les paramètres de sécurité du serveur",
+        description="Analyse les paramètres de sécurité globaux du serveur (2FA, niveau de vérification, etc.)"
+    )
+    @commands.has_permissions(administrator=True)
+    async def server_settings_check(self, ctx):
+        """Vérifie les paramètres de sécurité critiques du serveur."""
+        guild = ctx.guild
+        security_issues = []
+        security_good = []
+        
+        # Check MFA requirement for moderation actions
+        if guild.mfa_level == discord.MFALevel.disabled:
+            security_issues.append("🔴 **2FA désactivé** - Les modérateurs n'ont pas besoin de 2FA")
+        else:
+            security_good.append("✅ **2FA activé** - 2FA requis pour les actions de modération")
+        
+        # Check verification level
+        verification_levels = {
+            discord.VerificationLevel.none: ("🔴 **Aucune vérification**", "Aucune restriction sur les nouveaux membres"),
+            discord.VerificationLevel.low: ("🟡 **Vérification faible**", "Email vérifié requis"),
+            discord.VerificationLevel.medium: ("🟡 **Vérification moyenne**", "Inscription Discord > 5 minutes"),
+            discord.VerificationLevel.high: ("🟢 **Vérification élevée**", "Membre du serveur > 10 minutes"),
+            discord.VerificationLevel.highest: ("🟢 **Vérification maximale**", "Numéro de téléphone vérifié requis")
+        }
+        
+        level_info = verification_levels.get(guild.verification_level)
+        if level_info:
+            if guild.verification_level in [discord.VerificationLevel.none, discord.VerificationLevel.low]:
+                security_issues.append(f"{level_info[0]} - {level_info[1]}")
+            else:
+                security_good.append(f"{level_info[0]} - {level_info[1]}")
+        
+        # Check explicit content filter
+        content_filter_levels = {
+            discord.ContentFilter.disabled: ("🔴 **Filtre de contenu désactivé**", "Aucun scan des images/vidéos"),
+            discord.ContentFilter.no_role: ("🟡 **Filtre partiel**", "Scan seulement pour les membres sans rôle"),
+            discord.ContentFilter.all_members: ("🟢 **Filtre complet**", "Scan pour tous les membres")
+        }
+        
+        filter_info = content_filter_levels.get(guild.explicit_content_filter)
+        if filter_info:
+            if guild.explicit_content_filter == discord.ContentFilter.disabled:
+                security_issues.append(f"{filter_info[0]} - {filter_info[1]}")
+            elif guild.explicit_content_filter == discord.ContentFilter.no_role:
+                security_issues.append(f"{filter_info[0]} - {filter_info[1]}")
+            else:
+                security_good.append(f"{filter_info[0]} - {filter_info[1]}")
+        
+        # Check default notifications
+        if guild.default_notifications == discord.NotificationLevel.all_messages:
+            security_issues.append("🟡 **Notifications par défaut** - Tous les messages (peut être spam)")
+        else:
+            security_good.append("✅ **Notifications** - Seulement mentions (recommandé)")
+        
+        # Check NSFW level (if available)
+        if hasattr(guild, 'nsfw_level'):
+            if guild.nsfw_level == discord.NSFWLevel.explicit:
+                security_issues.append("🔴 **Serveur NSFW explicite** - Contenu pour adultes")
+            elif guild.nsfw_level == discord.NSFWLevel.safe:
+                security_good.append("✅ **Serveur sûr** - Pas de contenu NSFW")
+        
+        # Check if server has community features enabled
+        if "COMMUNITY" in guild.features:
+            security_good.append("✅ **Serveur communautaire** - Fonctionnalités de modération avancées")
+            
+            # Check if server has moderation features
+            if "AUTO_MODERATION" in guild.features:
+                security_good.append("✅ **AutoMod activé** - Modération automatique disponible")
+        else:
+            security_issues.append("🟡 **Pas de fonctionnalités communautaires** - Modération limitée")
+        
+        # Check server features for security-related ones
+        security_features = []
+        if "VERIFIED" in guild.features:
+            security_features.append("✅ Serveur vérifié")
+        if "PARTNERED" in guild.features:
+            security_features.append("✅ Serveur partenaire")
+        if "AUTO_MODERATION" in guild.features:
+            security_features.append("✅ AutoModération")
+        if "RAID_ALERTS_DISABLED" in guild.features:
+            security_issues.append("🔴 **Alertes de raid désactivées**")
+        
+        # Check server size vs verification level (risk assessment)
+        member_count = guild.member_count
+        if member_count > 1000 and guild.verification_level in [discord.VerificationLevel.none, discord.VerificationLevel.low]:
+            security_issues.append(f"🔴 **Serveur large ({member_count} membres) avec vérification faible** - Risque de raid élevé")
+        elif member_count > 100 and guild.verification_level == discord.VerificationLevel.none:
+            security_issues.append(f"🟡 **Serveur moyen ({member_count} membres) sans vérification** - Vulnérable aux raids")
+        
+        # Create embed
+        embed = discord.Embed(
+            title="🛡️ Vérification des paramètres de sécurité",
+            color=discord.Color.red() if security_issues else discord.Color.green(),
+            timestamp=datetime.now(timezone.utc)
+        )
+        
+        # Add server info
+        embed.add_field(
+            name="📊 Informations du serveur",
+            value=f"**Nom:** {guild.name}\n**Membres:** {member_count}\n**Créé:** <t:{int(guild.created_at.timestamp())}:R>",
+            inline=False
+        )
+        
+        # Add security issues
+        if security_issues:
+            issues_text = "\n".join(security_issues[:10])
+            if len(security_issues) > 10:
+                issues_text += f"\n... et {len(security_issues) - 10} autres problèmes"
+            embed.add_field(
+                name=f"⚠️ Problèmes de sécurité ({len(security_issues)})",
+                value=issues_text,
+                inline=False
+            )
+        
+        # Add good security practices
+        if security_good:
+            good_text = "\n".join(security_good[:8])
+            if len(security_good) > 8:
+                good_text += f"\n... et {len(security_good) - 8} autres"
+            embed.add_field(
+                name=f"✅ Bonnes pratiques ({len(security_good)})",
+                value=good_text,
+                inline=False
+            )
+        
+        # Add special features if any
+        if security_features:
+            embed.add_field(
+                name="🌟 Fonctionnalités de sécurité",
+                value="\n".join(security_features),
+                inline=False
+            )
+        
+        # Add risk assessment
+        risk_score = len(security_issues)
+        if risk_score == 0:
+            risk_text = "🟢 **Faible** - Configuration sécurisée"
+        elif risk_score <= 2:
+            risk_text = "🟡 **Moyen** - Quelques améliorations recommandées"
+        elif risk_score <= 4:
+            risk_text = "🟠 **Élevé** - Plusieurs problèmes à corriger"
+        else:
+            risk_text = "🔴 **Critique** - Configuration dangereuse"
+        
+        embed.add_field(
+            name="📈 Niveau de risque",
+            value=risk_text,
+            inline=False
+        )
+        
+        await ctx.send(embed=embed)
         
     async def execute_checks(self, ctx):
         """Execute all critical checks."""
@@ -342,7 +490,8 @@ class CriticalsChecks(commands.Cog):
             self.admin_leak_check(ctx),
             self.dangerous_perm_check(ctx),
             self.everyone_perm_check(ctx),
-            self.unprotected_webhooks(ctx)
+            self.unprotected_webhooks(ctx),
+            self.server_settings_check(ctx)
         ]
         return asyncio.gather(*tasks)
 
