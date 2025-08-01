@@ -199,6 +199,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
+The bot on 
+[![Discord Bots](https://top.gg/api/widget/1400810869683785850.svg)(https://top.gg//bot/1400810869683785850)
+
 **⚠️ Disclaimer**: This bot is for legitimate security auditing purposes only. Ensure you have proper authorization before scanning Discord servers. The developers are not responsible for misuse of this tool.
 
 *Made with 🛡️ for Discord security*

@@ -1,9 +1,11 @@
 import discord
 import asyncio
 import traceback
+from discord import app_commands
 from discord.ext import commands
 from discord.ext.commands import Context
 from dotenv import dotenv_values
+from language_handler import language_handler
 
 token = dotenv_values(".env")["TOKEN"]
 
@@ -121,6 +123,94 @@ async def all_checks(ctx: Context):
 
     except Exception as e:
         await ctx.send(f"❌ An error occurred while executing checks: {e}")
+
+@bot.hybrid_command(
+    name="set_language",
+    brief="Sets the language for bot responses",
+    usage="set_language <language_code>",
+    description="Sets the language for bot responses in this server. Available: en, fr, es, de, it",
+    help="""Sets the language for bot responses in this server.
+
+    AVAILABLE LANGUAGES:
+    - en (English)
+    - fr (Français)
+    - es (Español)
+    - de (Deutsch)
+    - it (Italiano)
+
+    RESTRICTIONS:
+    - Reserved for administrators only
+
+    EXAMPLE:
+    - `set_language fr` : Set language to French
+    - `set_language en` : Set language to English
+    """,
+    hidden=False,
+    enabled=True,
+    case_insensitive=True,
+)
+@commands.has_permissions(administrator=True)
+@commands.guild_only()
+@app_commands.choices(
+    language_code=[
+        app_commands.Choice(name=language_handler.get_language_name(code), value=code)
+        for code in language_handler.get_supported_languages()
+    ]
+)
+async def set_language(ctx: Context, language_code: str = None):
+    """Set server language (Admin only)."""
+    guild_id = ctx.guild.id
+    
+    if language_code is None:
+        # Show current language and available options
+        current_lang = language_handler.get_server_language(guild_id)
+        current_lang_name = language_handler.get_language_name(current_lang)
+        supported_langs = language_handler.get_supported_languages()
+        
+        embed = discord.Embed(
+            title=language_handler.get_text(guild_id, "set_language_title"),
+            color=discord.Color.blue()
+        )
+        
+        embed.add_field(
+            name=language_handler.get_text(guild_id, "set_language_current", language=current_lang_name),
+            value="",
+            inline=False
+        )
+        
+        lang_list = "\n".join([f"• `{code}` - {language_handler.get_language_name(code)}" for code in supported_langs])
+        embed.add_field(
+            name="Available Languages",
+            value=lang_list,
+            inline=False
+        )
+        
+        embed.add_field(
+            name="Usage",
+            value=f"Usage: `{ctx.prefix}set_language <language_code>`",
+            inline=False
+        )
+        
+        await ctx.send(embed=embed)
+        return
+    
+    # Validate language code
+    language_code = language_code.lower()
+    if language_code not in language_handler.get_supported_languages():
+        supported_langs = ", ".join(language_handler.get_supported_languages())
+        message = language_handler.get_text(guild_id, "set_language_invalid", languages=supported_langs)
+        await ctx.send(message)
+        return
+    
+    # Set new language
+    if language_handler.set_server_language(guild_id, language_code):
+        lang_name = language_handler.get_language_name(language_code)
+        message = language_handler.get_text(guild_id, "set_language_success", language=lang_name)
+        await ctx.send(message)
+    else:
+        supported_langs = ", ".join(language_handler.get_supported_languages())
+        message = language_handler.get_text(guild_id, "set_language_invalid", languages=supported_langs)
+        await ctx.send(message)
 
 @bot.event
 async def on_ready():

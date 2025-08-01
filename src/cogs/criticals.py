@@ -7,6 +7,7 @@ import discord
 import asyncio
 from discord.ext import commands
 from datetime import datetime, timezone
+from language_handler import language_handler
 
 class CriticalsChecks(commands.Cog):
     """Critical security checks for Discord guild vulnerabilities."""
@@ -16,22 +17,32 @@ class CriticalsChecks(commands.Cog):
         self._role_cache = {}
      
     async def get_roles_with_perms(self, guild, permissions):
-        """Cache et optimise les requêtes de rôles"""
+        """Cache and optimize role queries"""
         cache_key = f"{guild.id}_{hash(tuple(permissions))}"
         if cache_key not in self._role_cache:
             roles = [role for role in guild.roles 
                     if any(getattr(role.permissions, perm) for perm in permissions)]
             self._role_cache[cache_key] = roles
-        return self._role_cache[cache_key]   
+        return self._role_cache[cache_key]
+    
+    def clear_cache(self, guild_id=None):
+        """Clear role cache for a specific guild or all guilds"""
+        if guild_id:
+            keys_to_remove = [key for key in self._role_cache.keys() if key.startswith(f"{guild_id}_")]
+            for key in keys_to_remove:
+                del self._role_cache[key]
+        else:
+            self._role_cache.clear()   
         
     @commands.hybrid_command(
         name="role_hierarchy_check",
-        brief="Vérifie la hiérarchie des rôles pour détecter les problèmes critiques",
-        description="Détecte si des rôles décoratifs sont placés au-dessus de rôles avec des permissions importantes"
+        brief="Check role hierarchy for critical issues",
+        description="Detect if decorative roles are placed above roles with important permissions"
     )
     @commands.has_permissions(administrator=True)
     async def role_hierarchy_check(self, ctx):
-        """Vérifie la hiérarchie des rôles pour détecter les problèmes de sécurité."""
+        """Check role hierarchy for security issues."""
+        lang = language_handler.get_server_language(ctx.guild.id)
         guild = ctx.guild
         issues = []
         
@@ -42,10 +53,14 @@ class CriticalsChecks(commands.Cog):
         ]
         
         roles_with_perms = []
-        for role in guild.roles:
+        
+        # Use cached method to get roles with dangerous permissions
+        roles_with_dangerous_perms = await self.get_roles_with_perms(guild, dangerous_perms)
+        
+        for role in roles_with_dangerous_perms:
             if role.name == "@everyone":
                 continue
-            role_perms = [perm for perm, value in role.permissions if value and perm in dangerous_perms]
+            role_perms = [perm for perm in dangerous_perms if getattr(role.permissions, perm)]
             if role_perms:
                 roles_with_perms.append((role, role_perms))
         
@@ -54,36 +69,50 @@ class CriticalsChecks(commands.Cog):
             higher_roles = [r for r in guild.roles if r.position > role.position and not any(getattr(r.permissions, perm) for perm in dangerous_perms)]
             if higher_roles:
                 for higher_role in higher_roles:
-                    issues.append(f"⚠️ Rôle décoratif `{higher_role.name}` (pos: {higher_role.position}) au-dessus du rôle avec permissions `{role.name}` (pos: {role.position}, perms: {', '.join(perms)})")
+                    issues.append(language_handler.get_text(ctx.guild.id, "role_hierarchy_decorative_above").format(
+                        decorative=higher_role.name, 
+                        decorative_pos=higher_role.position,
+                        perm_role=role.name,
+                        perm_pos=role.position,
+                        perms=', '.join(perms)
+                    ))
         
         embed = discord.Embed(
-            title="🔍 Vérification de la hiérarchie des rôles",
+            title=language_handler.get_text(ctx.guild.id, "role_hierarchy_title"),
             color=discord.Color.red() if issues else discord.Color.green(),
             timestamp=datetime.now(timezone.utc)
         )
         
         if issues:
-            embed.description = f"**{len(issues)} problème(s) détecté(s) :**\n" + "\n".join(issues[:10])
+            embed.description = language_handler.get_text(ctx.guild.id, "role_hierarchy_issues_found").format(count=len(issues)) + "\n" + "\n".join(issues[:10])
             if len(issues) > 10:
-                embed.add_field(name="Note", value=f"... et {len(issues) - 10} autres problèmes", inline=False)
+                embed.add_field(
+                    name=language_handler.get_text(ctx.guild.id, "note"), 
+                    value=language_handler.get_text(ctx.guild.id, "role_hierarchy_more_issues").format(count=len(issues) - 10), 
+                    inline=False
+                )
         else:
-            embed.description = "✅ Aucun problème de hiérarchie détecté"
+            embed.description = language_handler.get_text(ctx.guild.id, "role_hierarchy_safe")
         
         await ctx.send(embed=embed)
 
     @commands.hybrid_command(
         name="admin_leak_check",
-        brief="Détecte les fuites de permissions administrateur",
-        description="Vérifie si des rôles ont la permission Administrator sans surveillance appropriée"
+        brief="Detect administrator permission leaks",
+        description="Check for roles with Administrator permission without proper oversight"
     )
     @commands.has_permissions(administrator=True)
     async def admin_leak_check(self, ctx):
-        """Détecte les rôles avec permissions administrateur potentiellement dangereuses."""
+        """Detect roles with potentially dangerous administrator permissions."""
+        lang = language_handler.get_server_language(ctx.guild.id)
         guild = ctx.guild
         admin_roles = []
         
-        for role in guild.roles:
-            if role.permissions.administrator and role.name != "@everyone":
+        # Use cached method to get roles with administrator permissions
+        admin_permission_roles = await self.get_roles_with_perms(guild, ['administrator'])
+        
+        for role in admin_permission_roles:
+            if role.name != "@everyone":
                 # Check if it's a decorative role (no other meaningful permissions)
                 other_perms = [perm for perm, value in role.permissions if value and perm != 'administrator']
                 admin_roles.append({
@@ -94,40 +123,41 @@ class CriticalsChecks(commands.Cog):
                 })
         
         embed = discord.Embed(
-            title="🛡️ Vérification des permissions Administrator",
+            title=language_handler.get_text(ctx.guild.id, "admin_leak_title"),
             color=discord.Color.red() if admin_roles else discord.Color.green(),
             timestamp=datetime.now(timezone.utc)
         )
         
         if admin_roles:
-            description = f"**{len(admin_roles)} rôle(s) avec Administrator détecté(s) :**\n"
+            description = language_handler.get_text(ctx.guild.id, "admin_leak_found").format(count=len(admin_roles)) + "\n"
             for role_info in admin_roles:
                 role = role_info['role']
                 risk_level = "🔴" if role_info['members'] > 5 else "🟡"
-                description += f"{risk_level} `{role.name}` - {role_info['members']} membre(s), position {role_info['position']}\n"
+                description += f"{risk_level} `{role.name}` - {role_info['members']} {language_handler.get_text(ctx.guild.id, 'members')}, position {role_info['position']}\n"
             embed.description = description
             
             # Add warning for high-risk roles
             high_risk = [r for r in admin_roles if r['members'] > 5]
             if high_risk:
                 embed.add_field(
-                    name="⚠️ Rôles à risque élevé", 
-                    value=f"{len(high_risk)} rôle(s) avec beaucoup de membres.",
+                    name=language_handler.get_text(ctx.guild.id, "admin_leak_high_risk"), 
+                    value=language_handler.get_text(ctx.guild.id, "admin_leak_high_risk_desc").format(count=len(high_risk)),
                     inline=False
                 )
         else:
-            embed.description = "✅ Aucun rôle avec permission Administrator détecté"
+            embed.description = language_handler.get_text(ctx.guild.id, "admin_leak_safe")
         
         await ctx.send(embed=embed)
 
     @commands.hybrid_command(
         name="dangerous_perm_check",
-        brief="Liste tous les rôles avec des permissions dangereuses",
-        description="Scanne tous les rôles pour détecter les permissions critiques"
+        brief="List all roles with dangerous permissions",
+        description="Scan all roles to detect critical permissions"
     )
     @commands.has_permissions(administrator=True)
     async def dangerous_perm_check(self, ctx):
-        """Analyse tous les rôles pour détecter les permissions dangereuses."""
+        """Analyze all roles to detect dangerous permissions."""
+        lang = language_handler.get_server_language(ctx.guild.id)
         guild = ctx.guild
         dangerous_perms = {
             'administrator': '👑 Administrator',
@@ -141,7 +171,11 @@ class CriticalsChecks(commands.Cog):
         }
         
         dangerous_roles = []
-        for role in guild.roles:
+        
+        # Use cached method to get roles with any dangerous permissions
+        roles_with_dangerous_perms = await self.get_roles_with_perms(guild, list(dangerous_perms.keys()))
+        
+        for role in roles_with_dangerous_perms:
             if role.name == "@everyone":
                 continue
             
@@ -158,7 +192,7 @@ class CriticalsChecks(commands.Cog):
                 })
         
         embed = discord.Embed(
-            title="⚠️ Rôles avec permissions dangereuses",
+            title=language_handler.get_text(ctx.guild.id, "dangerous_perm_title"),
             color=discord.Color.orange(),
             timestamp=datetime.now(timezone.utc)
         )
@@ -167,32 +201,33 @@ class CriticalsChecks(commands.Cog):
             # Sort by number of dangerous permissions
             dangerous_roles.sort(key=lambda x: len(x['perms']), reverse=True)
             
-            description = f"**{len(dangerous_roles)} rôle(s) avec permissions critiques :**\n\n"
+            description = language_handler.get_text(ctx.guild.id, "dangerous_perm_found").format(count=len(dangerous_roles)) + "\n\n"
             for role_info in dangerous_roles[:15]:  # Limit to 15 roles
                 role = role_info['role']
                 perms_list = ', '.join(role_info['perms'][:3])  # Show first 3 perms
                 if len(role_info['perms']) > 3:
-                    perms_list += f" (+{len(role_info['perms']) - 3} autres)"
+                    perms_list += f" (+{len(role_info['perms']) - 3} {language_handler.get_text(ctx.guild.id, 'others')})"
                 
-                description += f"**{role.name}** ({role_info['members']} membres)\n{perms_list}\n\n"
+                description += f"**{role.name}** ({role_info['members']} {language_handler.get_text(ctx.guild.id, 'members')})\n{perms_list}\n\n"
             
             if len(dangerous_roles) > 15:
-                description += f"... et {len(dangerous_roles) - 15} autres rôles"
+                description += language_handler.get_text(ctx.guild.id, "dangerous_perm_more").format(count=len(dangerous_roles) - 15)
                 
             embed.description = description
         else:
-            embed.description = "✅ Aucun rôle avec permissions dangereuses détecté"
+            embed.description = language_handler.get_text(ctx.guild.id, "dangerous_perm_safe")
         
         await ctx.send(embed=embed)
 
     @commands.hybrid_command(
         name="everyone_perm_check",
-        brief="Vérifie les permissions du rôle @everyone",
-        description="Analyse les permissions du rôle @everyone dans tous les salons"
+        brief="Check @everyone role permissions",
+        description="Analyze @everyone role permissions in all channels"
     )
     @commands.has_permissions(administrator=True)
     async def everyone_perm_check(self, ctx):
-        """Vérifie les permissions dangereuses du rôle @everyone."""
+        """Check dangerous permissions of the @everyone role."""
+        lang = language_handler.get_server_language(ctx.guild.id)
         guild = ctx.guild
         everyone_role = guild.default_role
         issues = []
@@ -209,7 +244,7 @@ class CriticalsChecks(commands.Cog):
                 guild_issues.append(f"🔴 {perm}")
         
         if guild_issues:
-            issues.append(f"**Permissions globales dangereuses :** {', '.join(guild_issues)}")
+            issues.append(f"**{language_handler.get_text(ctx.guild.id, 'everyone_perm_global_dangerous')}:** {', '.join(guild_issues)}")
         
         # Check channel-level permissions
         problematic_channels = []
@@ -233,7 +268,7 @@ class CriticalsChecks(commands.Cog):
                     problematic_channels.append(f"#{channel.name}: {', '.join(channel_issues)}")
         
         embed = discord.Embed(
-            title="👥 Vérification des permissions @everyone",
+            title=language_handler.get_text(ctx.guild.id, "everyone_perm_title"),
             color=discord.Color.red() if (guild_issues or problematic_channels) else discord.Color.green(),
             timestamp=datetime.now(timezone.utc)
         )
@@ -244,33 +279,37 @@ class CriticalsChecks(commands.Cog):
                 description += "\n".join(issues) + "\n\n"
             
             if problematic_channels:
-                description += f"**Salons avec permissions dangereuses ({len(problematic_channels)}) :**\n"
+                description += f"**{language_handler.get_text(ctx.guild.id, 'everyone_perm_channels_dangerous').format(count=len(problematic_channels))}:**\n"
                 description += "\n".join(problematic_channels[:10])
                 if len(problematic_channels) > 10:
-                    description += f"\n... et {len(problematic_channels) - 10} autres salons"
+                    description += f"\n{language_handler.get_text(ctx.guild.id, 'everyone_perm_more_channels').format(count=len(problematic_channels) - 10)}"
             
             embed.description = description
         else:
-            embed.description = "✅ Aucune permission dangereuse détectée pour @everyone"
+            embed.description = language_handler.get_text(ctx.guild.id, "everyone_perm_safe")
         
         await ctx.send(embed=embed)
 
     @commands.hybrid_command(
         name="unprotected_webhooks",
-        brief="Vérifie les salons vulnérables aux abus de webhooks",
-        description="Détecte les salons où les webhooks peuvent être abusés"
+        brief="Check channels vulnerable to webhook abuse",
+        description="Detect channels where webhooks can be abused"
     )
     @commands.has_permissions(administrator=True)
     async def unprotected_webhooks(self, ctx):
-        """Vérifie les vulnérabilités liées aux webhooks."""
+        """Check webhook-related vulnerabilities."""
+        lang = language_handler.get_server_language(ctx.guild.id)
         guild = ctx.guild
         vulnerable_channels = []
+        
+        # Get roles that can manage webhooks using cache
+        webhook_roles = await self.get_roles_with_perms(guild, ['manage_webhooks'])
         
         for channel in guild.text_channels:
             # Check roles that can both manage webhooks and send messages
             vulnerable_roles = []
             
-            for role in guild.roles:
+            for role in webhook_roles:
                 if role.name == "@everyone":
                     overwrites = channel.overwrites_for(role)
                     if (overwrites.manage_webhooks or role.permissions.manage_webhooks) and \
@@ -283,7 +322,7 @@ class CriticalsChecks(commands.Cog):
                     has_send_perm = overwrites.send_messages or role.permissions.send_messages
                     
                     if has_webhook_perm and has_send_perm and len(role.members) > 0:
-                        vulnerable_roles.append(f"{role.name} ({len(role.members)} membres)")
+                        vulnerable_roles.append(f"{role.name} ({len(role.members)} {language_handler.get_text(ctx.guild.id, 'members')})")
             
             if vulnerable_roles:
                 # Check existing webhooks
@@ -291,7 +330,7 @@ class CriticalsChecks(commands.Cog):
                     webhooks = await channel.webhooks()
                     webhook_count = len(webhooks)
                 except:
-                    webhook_count = "Erreur"
+                    webhook_count = language_handler.get_text(ctx.guild.id, "error")
                 
                 vulnerable_channels.append({
                     'channel': channel,
@@ -300,13 +339,13 @@ class CriticalsChecks(commands.Cog):
                 })
         
         embed = discord.Embed(
-            title="🔗 Vérification des vulnérabilités webhook",
+            title=language_handler.get_text(ctx.guild.id, "webhook_vuln_title"),
             color=discord.Color.red() if vulnerable_channels else discord.Color.green(),
             timestamp=datetime.now(timezone.utc)
         )
         
         if vulnerable_channels:
-            description = f"**{len(vulnerable_channels)} salon(s) vulnérable(s) détecté(s) :**\n\n"
+            description = language_handler.get_text(ctx.guild.id, "webhook_vuln_found").format(count=len(vulnerable_channels)) + "\n\n"
             
             for channel_info in vulnerable_channels[:10]:
                 channel = channel_info['channel']
@@ -315,122 +354,121 @@ class CriticalsChecks(commands.Cog):
                 
                 risk_level = "🔴" if len(roles) > 3 or "@everyone" in str(roles) else "🟡"
                 description += f"{risk_level} **#{channel.name}** ({webhook_count} webhooks)\n"
-                description += f"Rôles à risque: {', '.join(roles[:3])}"
+                description += f"{language_handler.get_text(ctx.guild.id, 'webhook_vuln_risky_roles')}: {', '.join(roles[:3])}"
                 if len(roles) > 3:
-                    description += f" (+{len(roles) - 3} autres)"
+                    description += f" (+{len(roles) - 3} {language_handler.get_text(ctx.guild.id, 'others')})"
                 description += "\n\n"
             
             if len(vulnerable_channels) > 10:
-                description += f"... et {len(vulnerable_channels) - 10} autres salons"
+                description += language_handler.get_text(ctx.guild.id, "webhook_vuln_more").format(count=len(vulnerable_channels) - 10)
             
             embed.description = description
         else:
-            embed.description = "✅ Aucune vulnérabilité webhook détectée"
+            embed.description = language_handler.get_text(ctx.guild.id, "webhook_vuln_safe")
         
         await ctx.send(embed=embed)
 
     @commands.hybrid_command(
         name="server_settings_check",
-        brief="Vérifie les paramètres de sécurité du serveur",
-        description="Analyse les paramètres de sécurité globaux du serveur (2FA, niveau de vérification, etc.)"
+        brief="Check server security settings",
+        description="Analyze global server security settings (2FA, verification level, etc.)"
     )
     @commands.has_permissions(administrator=True)
     async def server_settings_check(self, ctx):
-        """Vérifie les paramètres de sécurité critiques du serveur."""
+        """Check critical server security settings."""
+        lang = language_handler.get_server_language(ctx.guild.id)
         guild = ctx.guild
         security_issues = []
         security_good = []
         
         # Check MFA requirement for moderation actions
         if guild.mfa_level == discord.MFALevel.disabled:
-            security_issues.append("🔴 **2FA désactivé** - Les modérateurs n'ont pas besoin de 2FA")
+            security_issues.append(f"🔴 **{language_handler.get_text(ctx.guild.id, 'server_settings_2fa_disabled')}** - {language_handler.get_text(ctx.guild.id, 'server_settings_2fa_disabled_desc')}")
         else:
-            security_good.append("✅ **2FA activé** - 2FA requis pour les actions de modération")
+            security_good.append(f"✅ **{language_handler.get_text(ctx.guild.id, 'server_settings_2fa_enabled')}** - {language_handler.get_text(ctx.guild.id, 'server_settings_2fa_enabled_desc')}")
         
         # Check verification level
-        verification_levels = {
-            discord.VerificationLevel.none: ("🔴 **Aucune vérification**", "Aucune restriction sur les nouveaux membres"),
-            discord.VerificationLevel.low: ("🟡 **Vérification faible**", "Email vérifié requis"),
-            discord.VerificationLevel.medium: ("🟡 **Vérification moyenne**", "Inscription Discord > 5 minutes"),
-            discord.VerificationLevel.high: ("🟢 **Vérification élevée**", "Membre du serveur > 10 minutes"),
-            discord.VerificationLevel.highest: ("🟢 **Vérification maximale**", "Numéro de téléphone vérifié requis")
+        verification_texts = {
+            discord.VerificationLevel.none: ("server_settings_verif_none", "server_settings_verif_none_desc"),
+            discord.VerificationLevel.low: ("server_settings_verif_low", "server_settings_verif_low_desc"),
+            discord.VerificationLevel.medium: ("server_settings_verif_medium", "server_settings_verif_medium_desc"),
+            discord.VerificationLevel.high: ("server_settings_verif_high", "server_settings_verif_high_desc"),
+            discord.VerificationLevel.highest: ("server_settings_verif_highest", "server_settings_verif_highest_desc")
         }
         
-        level_info = verification_levels.get(guild.verification_level)
-        if level_info:
-            if guild.verification_level in [discord.VerificationLevel.none, discord.VerificationLevel.low]:
-                security_issues.append(f"{level_info[0]} - {level_info[1]}")
-            else:
-                security_good.append(f"{level_info[0]} - {level_info[1]}")
+        verif_key, verif_desc = verification_texts.get(guild.verification_level, ("unknown", "unknown"))
+        if guild.verification_level in [discord.VerificationLevel.none, discord.VerificationLevel.low]:
+            security_issues.append(f"🔴 **{language_handler.get_text(ctx.guild.id, verif_key)}** - {language_handler.get_text(ctx.guild.id, verif_desc)}")
+        else:
+            security_good.append(f"🟢 **{language_handler.get_text(ctx.guild.id, verif_key)}** - {language_handler.get_text(ctx.guild.id, verif_desc)}")
         
         # Check explicit content filter
-        content_filter_levels = {
-            discord.ContentFilter.disabled: ("🔴 **Filtre de contenu désactivé**", "Aucun scan des images/vidéos"),
-            discord.ContentFilter.no_role: ("🟡 **Filtre partiel**", "Scan seulement pour les membres sans rôle"),
-            discord.ContentFilter.all_members: ("🟢 **Filtre complet**", "Scan pour tous les membres")
+        content_filter_texts = {
+            discord.ContentFilter.disabled: ("server_settings_filter_disabled", "server_settings_filter_disabled_desc"),
+            discord.ContentFilter.no_role: ("server_settings_filter_partial", "server_settings_filter_partial_desc"),
+            discord.ContentFilter.all_members: ("server_settings_filter_full", "server_settings_filter_full_desc")
         }
         
-        filter_info = content_filter_levels.get(guild.explicit_content_filter)
-        if filter_info:
-            if guild.explicit_content_filter == discord.ContentFilter.disabled:
-                security_issues.append(f"{filter_info[0]} - {filter_info[1]}")
-            elif guild.explicit_content_filter == discord.ContentFilter.no_role:
-                security_issues.append(f"{filter_info[0]} - {filter_info[1]}")
-            else:
-                security_good.append(f"{filter_info[0]} - {filter_info[1]}")
+        filter_key, filter_desc = content_filter_texts.get(guild.explicit_content_filter, ("unknown", "unknown"))
+        if guild.explicit_content_filter == discord.ContentFilter.disabled:
+            security_issues.append(f"🔴 **{language_handler.get_text(ctx.guild.id, filter_key)}** - {language_handler.get_text(ctx.guild.id, filter_desc)}")
+        elif guild.explicit_content_filter == discord.ContentFilter.no_role:
+            security_issues.append(f"🟡 **{language_handler.get_text(ctx.guild.id, filter_key)}** - {language_handler.get_text(ctx.guild.id, filter_desc)}")
+        else:
+            security_good.append(f"🟢 **{language_handler.get_text(ctx.guild.id, filter_key)}** - {language_handler.get_text(ctx.guild.id, filter_desc)}")
         
         # Check default notifications
         if guild.default_notifications == discord.NotificationLevel.all_messages:
-            security_issues.append("🟡 **Notifications par défaut** - Tous les messages (peut être spam)")
+            security_issues.append(f"🟡 **{language_handler.get_text(ctx.guild.id, 'server_settings_notif_all')}** - {language_handler.get_text(ctx.guild.id, 'server_settings_notif_all_desc')}")
         else:
-            security_good.append("✅ **Notifications** - Seulement mentions (recommandé)")
+            security_good.append(f"✅ **{language_handler.get_text(ctx.guild.id, 'server_settings_notif_mentions')}** - {language_handler.get_text(ctx.guild.id, 'server_settings_notif_mentions_desc')}")
         
         # Check NSFW level (if available)
         if hasattr(guild, 'nsfw_level'):
             if guild.nsfw_level == discord.NSFWLevel.explicit:
-                security_issues.append("🔴 **Serveur NSFW explicite** - Contenu pour adultes")
+                security_issues.append(f"🔴 **{language_handler.get_text(ctx.guild.id, 'server_settings_nsfw_explicit')}** - {language_handler.get_text(ctx.guild.id, 'server_settings_nsfw_explicit_desc')}")
             elif guild.nsfw_level == discord.NSFWLevel.safe:
-                security_good.append("✅ **Serveur sûr** - Pas de contenu NSFW")
+                security_good.append(f"✅ **{language_handler.get_text(ctx.guild.id, 'server_settings_nsfw_safe')}** - {language_handler.get_text(ctx.guild.id, 'server_settings_nsfw_safe_desc')}")
         
         # Check if server has community features enabled
         if "COMMUNITY" in guild.features:
-            security_good.append("✅ **Serveur communautaire** - Fonctionnalités de modération avancées")
+            security_good.append(f"✅ **{language_handler.get_text(ctx.guild.id, 'server_settings_community')}** - {language_handler.get_text(ctx.guild.id, 'server_settings_community_desc')}")
             
             # Check if server has moderation features
             if "AUTO_MODERATION" in guild.features:
-                security_good.append("✅ **AutoMod activé** - Modération automatique disponible")
+                security_good.append(f"✅ **{language_handler.get_text(ctx.guild.id, 'server_settings_automod')}** - {language_handler.get_text(ctx.guild.id, 'server_settings_automod_desc')}")
         else:
-            security_issues.append("🟡 **Pas de fonctionnalités communautaires** - Modération limitée")
+            security_issues.append(f"🟡 **{language_handler.get_text(ctx.guild.id, 'server_settings_no_community')}** - {language_handler.get_text(ctx.guild.id, 'server_settings_no_community_desc')}")
         
         # Check server features for security-related ones
         security_features = []
         if "VERIFIED" in guild.features:
-            security_features.append("✅ Serveur vérifié")
+            security_features.append(f"✅ {language_handler.get_text(ctx.guild.id, 'server_settings_verified')}")
         if "PARTNERED" in guild.features:
-            security_features.append("✅ Serveur partenaire")
+            security_features.append(f"✅ {language_handler.get_text(ctx.guild.id, 'server_settings_partnered')}")
         if "AUTO_MODERATION" in guild.features:
-            security_features.append("✅ AutoModération")
+            security_features.append(f"✅ {language_handler.get_text(ctx.guild.id, 'server_settings_automod')}")
         if "RAID_ALERTS_DISABLED" in guild.features:
-            security_issues.append("🔴 **Alertes de raid désactivées**")
+            security_issues.append(f"🔴 **{language_handler.get_text(ctx.guild.id, 'server_settings_raid_alerts_disabled')}**")
         
         # Check server size vs verification level (risk assessment)
         member_count = guild.member_count
         if member_count > 1000 and guild.verification_level in [discord.VerificationLevel.none, discord.VerificationLevel.low]:
-            security_issues.append(f"🔴 **Serveur large ({member_count} membres) avec vérification faible** - Risque de raid élevé")
+            security_issues.append(language_handler.get_text(ctx.guild.id, 'server_settings_large_server_risk').format(count=member_count))
         elif member_count > 100 and guild.verification_level == discord.VerificationLevel.none:
-            security_issues.append(f"🟡 **Serveur moyen ({member_count} membres) sans vérification** - Vulnérable aux raids")
+            security_issues.append(language_handler.get_text(ctx.guild.id, 'server_settings_medium_server_risk').format(count=member_count))
         
         # Create embed
         embed = discord.Embed(
-            title="🛡️ Vérification des paramètres de sécurité",
+            title=language_handler.get_text(ctx.guild.id, "server_settings_title"),
             color=discord.Color.red() if security_issues else discord.Color.green(),
             timestamp=datetime.now(timezone.utc)
         )
         
         # Add server info
         embed.add_field(
-            name="📊 Informations du serveur",
-            value=f"**Nom:** {guild.name}\n**Membres:** {member_count}\n**Créé:** <t:{int(guild.created_at.timestamp())}:R>",
+            name=language_handler.get_text(ctx.guild.id, "server_settings_info"),
+            value=f"**{language_handler.get_text(ctx.guild.id, 'name')}:** {guild.name}\n**{language_handler.get_text(ctx.guild.id, 'members')}:** {member_count}\n**{language_handler.get_text(ctx.guild.id, 'created')}:** <t:{int(guild.created_at.timestamp())}:R>",
             inline=False
         )
         
@@ -438,9 +476,9 @@ class CriticalsChecks(commands.Cog):
         if security_issues:
             issues_text = "\n".join(security_issues[:10])
             if len(security_issues) > 10:
-                issues_text += f"\n... et {len(security_issues) - 10} autres problèmes"
+                issues_text += f"\n{language_handler.get_text(ctx.guild.id, 'server_settings_more_issues').format(count=len(security_issues) - 10)}"
             embed.add_field(
-                name=f"⚠️ Problèmes de sécurité ({len(security_issues)})",
+                name=language_handler.get_text(ctx.guild.id, "server_settings_security_issues").format(count=len(security_issues)),
                 value=issues_text,
                 inline=False
             )
@@ -449,9 +487,9 @@ class CriticalsChecks(commands.Cog):
         if security_good:
             good_text = "\n".join(security_good[:8])
             if len(security_good) > 8:
-                good_text += f"\n... et {len(security_good) - 8} autres"
+                good_text += f"\n{language_handler.get_text(ctx.guild.id, 'server_settings_more_good').format(count=len(security_good) - 8)}"
             embed.add_field(
-                name=f"✅ Bonnes pratiques ({len(security_good)})",
+                name=language_handler.get_text(ctx.guild.id, "server_settings_good_practices").format(count=len(security_good)),
                 value=good_text,
                 inline=False
             )
@@ -459,7 +497,7 @@ class CriticalsChecks(commands.Cog):
         # Add special features if any
         if security_features:
             embed.add_field(
-                name="🌟 Fonctionnalités de sécurité",
+                name=language_handler.get_text(ctx.guild.id, "server_settings_security_features"),
                 value="\n".join(security_features),
                 inline=False
             )
@@ -467,16 +505,16 @@ class CriticalsChecks(commands.Cog):
         # Add risk assessment
         risk_score = len(security_issues)
         if risk_score == 0:
-            risk_text = "🟢 **Faible** - Configuration sécurisée"
+            risk_text = f"🟢 **{language_handler.get_text(ctx.guild.id, 'server_settings_risk_low')}** - {language_handler.get_text(ctx.guild.id, 'server_settings_risk_low_desc')}"
         elif risk_score <= 2:
-            risk_text = "🟡 **Moyen** - Quelques améliorations recommandées"
+            risk_text = f"🟡 **{language_handler.get_text(ctx.guild.id, 'server_settings_risk_medium')}** - {language_handler.get_text(ctx.guild.id, 'server_settings_risk_medium_desc')}"
         elif risk_score <= 4:
-            risk_text = "🟠 **Élevé** - Plusieurs problèmes à corriger"
+            risk_text = f"🟠 **{language_handler.get_text(ctx.guild.id, 'server_settings_risk_high')}** - {language_handler.get_text(ctx.guild.id, 'server_settings_risk_high_desc')}"
         else:
-            risk_text = "🔴 **Critique** - Configuration dangereuse"
+            risk_text = f"🔴 **{language_handler.get_text(ctx.guild.id, 'server_settings_risk_critical')}** - {language_handler.get_text(ctx.guild.id, 'server_settings_risk_critical_desc')}"
         
         embed.add_field(
-            name="📈 Niveau de risque",
+            name=language_handler.get_text(ctx.guild.id, "server_settings_risk_level"),
             value=risk_text,
             inline=False
         )
